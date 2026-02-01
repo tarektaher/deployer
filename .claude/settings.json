@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gemini:*)",
+      "Bash(docker:*)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Read",
+      "Write",
+      "Edit"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'File modified - remember to commit'"
+          }
+        ]
+      }
+    ]
+  }
+}

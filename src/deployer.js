@@ -362,6 +362,22 @@ export class Deployer {
         await fs.copy(path.join(sharedDir, '.env'), path.join(newReleaseDir, '.env'));
       }
 
+      // Copy Docker configuration files to new release
+      spinner.text = 'Setting up Docker configuration...';
+      const templateDir = path.join(TEMPLATES_DIR, metadata.type);
+      const dockerfileSrc = path.join(templateDir, 'Dockerfile');
+      if (await fs.pathExists(dockerfileSrc)) {
+        await fs.copy(dockerfileSrc, path.join(newReleaseDir, 'Dockerfile'));
+      }
+      const nginxConfSrc = path.join(templateDir, 'nginx.conf');
+      if (await fs.pathExists(nginxConfSrc)) {
+        await fs.copy(nginxConfSrc, path.join(newReleaseDir, 'nginx.conf'));
+      }
+      const supervisordSrc = path.join(templateDir, 'supervisord.conf');
+      if (await fs.pathExists(supervisordSrc)) {
+        await fs.copy(supervisordSrc, path.join(newReleaseDir, 'supervisord.conf'));
+      }
+
       // Build new containers with different project name suffix
       spinner.text = 'Building new containers...';
       const tempComposePath = path.join(projectDir, 'docker-compose.new.yml');

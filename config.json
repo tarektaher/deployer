@@ -1,7 +1,7 @@
 {
   "projectsDir": "/home/tarek_bentaher/projects",
   "domainSuffix": "tarek-taher.duckdns.org",
-  "maxReleases": 5,
+  "maxReleases": 3,
   "npm": {
     "url": "http://localhost:81"
   }

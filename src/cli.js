@@ -195,4 +195,62 @@ program
     }
   });
 
+// Config command group for secrets management
+const configCmd = program
+  .command('config')
+  .description('Manage deployer configuration and secrets');
+
+// Set NPM credentials (interactive)
+configCmd
+  .command('set-credentials')
+  .description('Set NPM credentials (stored encrypted with AES-256-GCM)')
+  .action(async () => {
+    try {
+      await deployer.setCredentials();
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Migrate legacy credentials
+configCmd
+  .command('migrate')
+  .description('Migrate plaintext credentials to encrypted storage')
+  .action(async () => {
+    try {
+      await deployer.migrateCredentials();
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Rotate master encryption key
+configCmd
+  .command('rotate-key')
+  .description('Rotate the master encryption key')
+  .option('-f, --force', 'Force rotation without confirmation')
+  .action(async (options) => {
+    try {
+      await deployer.rotateKey(options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Show config status
+configCmd
+  .command('status')
+  .description('Show configuration and secrets status')
+  .action(async () => {
+    try {
+      await deployer.configStatus();
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
 program.parse();

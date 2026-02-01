@@ -1,10 +1,9 @@
 import axios from 'axios';
-import fs from 'fs-extra';
-import path from 'path';
 import { getRegistryDir, getNpmUrl } from '../config.js';
+import { SecretsConfig } from './secrets-config.js';
 
 const REGISTRY_DIR = getRegistryDir();
-const CONFIG_FILE = path.join(REGISTRY_DIR, 'config.json');
+const secretsConfig = new SecretsConfig(REGISTRY_DIR);
 
 export class NpmApi {
   constructor() {
@@ -12,25 +11,18 @@ export class NpmApi {
     this.token = null;
   }
 
-  async loadConfig() {
-    if (await fs.pathExists(CONFIG_FILE)) {
-      return await fs.readJson(CONFIG_FILE);
-    }
-    return null;
-  }
-
   async authenticate() {
     if (this.token) return true;
 
-    const config = await this.loadConfig();
-    if (!config?.npmEmail || !config?.npmPassword) {
+    const credentials = await secretsConfig.getNpmCredentials();
+    if (!credentials?.email || !credentials?.password) {
       return false;
     }
 
     try {
       const response = await axios.post(`${this.baseUrl}/tokens`, {
-        identity: config.npmEmail,
-        secret: config.npmPassword
+        identity: credentials.email,
+        secret: credentials.password
       });
 
       this.token = response.data.token;
@@ -161,6 +153,9 @@ export class NpmApi {
         return false;
       }
 
+      // Get email for Let's Encrypt
+      const letsEncryptEmail = await secretsConfig.getLetsEncryptEmail();
+
       // Create certificate request
       const response = await axios.post(
         `${this.baseUrl}/nginx/certificates`,
@@ -169,7 +164,7 @@ export class NpmApi {
           meta: {
             letsencrypt_agree: true,
             dns_challenge: false,
-            letsencrypt_email: (await this.loadConfig())?.npmEmail
+            letsencrypt_email: letsEncryptEmail
           }
         },
         { headers: this.getHeaders() }

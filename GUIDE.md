@@ -9,6 +9,7 @@ A bulletproof deployment agent for Laravel, React, Vue, and Node.js projects wit
 - [Project Types](#project-types)
 - [Database Support](#database-support)
 - [Configuration](#configuration)
+- [Security & Secrets Management](#security--secrets-management)
 - [Directory Structure](#directory-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -326,6 +327,41 @@ deploy db backup --project my-app --file /path/to/backup.sql
 deploy db restore --project my-app --file /path/to/backup.sql
 ```
 
+### `deploy config <action>`
+
+Configuration and secrets management.
+
+```bash
+deploy config <action> [options]
+```
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `set-credentials` | Set NPM credentials (stored encrypted) |
+| `migrate` | Migrate plaintext credentials to encrypted storage |
+| `rotate-key` | Rotate the master encryption key |
+| `status` | Show configuration and secrets status |
+
+**Examples:**
+
+```bash
+# Set encrypted NPM credentials
+deploy config set-credentials
+
+# Migrate legacy plaintext credentials
+deploy config migrate
+
+# Rotate encryption key
+deploy config rotate-key --force
+
+# Check configuration status
+deploy config status
+```
+
+See [Security & Secrets Management](#security--secrets-management) for detailed information.
+
 ---
 
 ## Project Types
@@ -443,6 +479,304 @@ Project-specific `.env` files are stored in: `/home/tarek_bentaher/projects/<nam
 
 ---
 
+## Security & Secrets Management
+
+The deployer includes enterprise-grade secrets management with AES-256-GCM encryption for secure credential storage.
+
+### Overview
+
+**Security Features:**
+- AES-256-GCM authenticated encryption
+- PBKDF2 key derivation with 100,000 iterations
+- 12-byte IV (96-bit) following NIST standards
+- Master key stored with `0o600` permissions
+- Encrypted secrets in `/projects/.registry/secrets/*.enc`
+- Support for environment variable overrides (CI/CD)
+
+### Credential Priority
+
+The deployer retrieves NPM credentials in the following priority order:
+
+1. **Environment Variables** (highest priority - for CI/CD)
+   - `NPM_EMAIL`
+   - `NPM_PASSWORD`
+
+2. **Encrypted Storage** (recommended for local/server deployments)
+   - Stored in `/projects/.registry/secrets/npm_credentials.enc`
+   - Protected with AES-256-GCM encryption
+
+3. **Legacy Plaintext Config** (deprecated)
+   - `config.json` with plaintext credentials
+   - Shows deprecation warning
+   - Should be migrated to encrypted storage
+
+### Commands
+
+#### `deploy config set-credentials`
+
+Interactively set NPM credentials with encrypted storage.
+
+```bash
+deploy config set-credentials
+```
+
+**What happens:**
+1. Prompts for NPM email and password
+2. Encrypts credentials using AES-256-GCM
+3. Stores in `/projects/.registry/secrets/npm_credentials.enc`
+4. Sets file permissions to `0o600` (owner read/write only)
+
+**Example:**
+```bash
+$ deploy config set-credentials
+Enter NPM email: admin@example.com
+Enter NPM password: ********
+✓ Credentials stored securely
+```
+
+#### `deploy config migrate`
+
+Migrate existing plaintext credentials to encrypted storage.
+
+```bash
+deploy config migrate
+```
+
+**What happens:**
+1. Reads credentials from `config.json`
+2. Encrypts and stores in secure storage
+3. Removes plaintext credentials from `config.json`
+4. Preserves other config settings (domain, npmUrl, etc.)
+
+**Example:**
+```bash
+$ deploy config migrate
+✓ Migrated credentials to encrypted storage
+✓ Removed plaintext credentials from config.json
+```
+
+**Before migration:**
+```json
+{
+  "npmUrl": "http://localhost:81",
+  "npmEmail": "admin@example.com",
+  "npmPassword": "secret123",
+  "domain": "example.com"
+}
+```
+
+**After migration:**
+```json
+{
+  "npmUrl": "http://localhost:81",
+  "domain": "example.com",
+  "initialized": true
+}
+```
+
+#### `deploy config rotate-key`
+
+Rotate the master encryption key and re-encrypt all secrets.
+
+```bash
+deploy config rotate-key [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation prompt |
+
+**What happens:**
+1. Decrypts all existing secrets with current key
+2. Generates new master key
+3. Re-encrypts all secrets with new key
+4. Updates master key file
+
+**Example:**
+```bash
+$ deploy config rotate-key
+⚠ This will rotate the master encryption key and re-encrypt all secrets.
+Continue? (y/n): y
+✓ Master key rotated successfully
+✓ Re-encrypted 3 secrets
+```
+
+**Use cases:**
+- Regular security maintenance
+- After potential key exposure
+- Compliance requirements
+
+#### `deploy config status`
+
+Show configuration and credential status.
+
+```bash
+deploy config status
+```
+
+**Example output:**
+```bash
+Configuration Status:
+
+  Credentials Source:  encrypted
+  NPM URL:             http://localhost:81
+  Domain:              tarek-taher.duckdns.org
+  Encrypted Secrets:   2
+  Master Key:          ✓ Present
+
+Security:
+  ✓ Using encrypted credential storage
+  ✓ Master key permissions: 0o600
+```
+
+**Credential sources:**
+- `env` - Using environment variables
+- `encrypted` - Using encrypted storage (recommended)
+- `legacy` - Using plaintext config (deprecated)
+- `none` - No credentials configured
+
+### Environment Variables for CI/CD
+
+For automated deployments in CI/CD pipelines, use environment variables to override encrypted storage:
+
+```bash
+# GitHub Actions example
+export NPM_EMAIL="ci@example.com"
+export NPM_PASSWORD="${{ secrets.NPM_PASSWORD }}"
+export DEPLOYER_MASTER_KEY="${{ secrets.DEPLOYER_MASTER_KEY }}"
+
+deploy create my-app --repo https://github.com/user/app --type node
+```
+
+**Environment Variables:**
+
+| Variable | Description | Priority |
+|----------|-------------|----------|
+| `NPM_EMAIL` | NPM authentication email | Highest |
+| `NPM_PASSWORD` | NPM authentication password | Highest |
+| `DEPLOYER_MASTER_KEY` | Override master encryption key | Optional |
+
+**Benefits:**
+- No credential files needed in CI/CD
+- Secrets managed by CI/CD platform
+- Same CLI commands work everywhere
+- Optional master key override for distributed deployments
+
+### Encryption Details
+
+**Algorithm:** AES-256-GCM (Galois/Counter Mode)
+- Industry-standard authenticated encryption
+- Provides both confidentiality and integrity
+- Prevents tampering with encrypted data
+
+**Key Derivation:** PBKDF2 with SHA-256
+- 100,000 iterations (NIST recommended minimum)
+- 64-byte random salt per secret
+- Derives 32-byte encryption key from master key
+
+**Initialization Vector (IV):**
+- 12-byte (96-bit) random IV per encryption
+- Follows NIST SP 800-38D recommendations
+- Never reused for the same key
+
+**Authentication Tag:**
+- 16-byte (128-bit) authentication tag
+- Verifies data integrity on decryption
+- Prevents unauthorized modifications
+
+**File Structure:**
+```
+[64-byte salt][12-byte IV][16-byte auth-tag][encrypted data]
+```
+
+### File Permissions
+
+Security-critical files have restricted permissions:
+
+| File | Permissions | Description |
+|------|-------------|-------------|
+| `.master-key` | `0o600` (rw-------) | Master encryption key |
+| `*.enc` | `0o600` (rw-------) | Encrypted secret files |
+| `.env` | `0o600` (rw-------) | Project environment files |
+
+### Best Practices
+
+1. **Initial Setup:**
+   ```bash
+   # Initialize deployer
+   deploy init
+
+   # Set encrypted credentials
+   deploy config set-credentials
+   ```
+
+2. **Migration from Plaintext:**
+   ```bash
+   # Migrate existing credentials
+   deploy config migrate
+
+   # Verify migration
+   deploy config status
+   ```
+
+3. **Regular Maintenance:**
+   ```bash
+   # Rotate encryption key quarterly
+   deploy config rotate-key
+   ```
+
+4. **CI/CD Setup:**
+   ```yaml
+   # .github/workflows/deploy.yml
+   env:
+     NPM_EMAIL: ${{ secrets.NPM_EMAIL }}
+     NPM_PASSWORD: ${{ secrets.NPM_PASSWORD }}
+
+   steps:
+     - name: Deploy
+       run: deploy create app --repo ${{ github.repository }}
+   ```
+
+5. **Backup Master Key:**
+   ```bash
+   # Backup master key to secure location
+   cp /projects/.registry/.master-key ~/backups/master-key.backup
+   chmod 600 ~/backups/master-key.backup
+   ```
+
+### Security Considerations
+
+**DO:**
+- Use `deploy config set-credentials` for interactive setup
+- Migrate legacy plaintext credentials with `deploy config migrate`
+- Use environment variables for CI/CD deployments
+- Rotate master key periodically
+- Backup master key to secure offline location
+- Verify file permissions after deployment
+
+**DON'T:**
+- Commit `.master-key` to version control
+- Share master key in plaintext
+- Use plaintext credentials in production
+- Store credentials in CI/CD logs
+- Disable encryption for convenience
+
+**In Case of Key Compromise:**
+```bash
+# 1. Rotate master key immediately
+deploy config rotate-key --force
+
+# 2. Update CI/CD secrets if using DEPLOYER_MASTER_KEY
+# (via your CI/CD platform's secret management)
+
+# 3. Verify all projects still work
+deploy list
+```
+
+---
+
 ## Directory Structure
 
 ```
@@ -454,9 +788,11 @@ Project-specific `.env` files are stored in: `/home/tarek_bentaher/projects/<nam
 │
 └── projects/                    # All deployed projects
     ├── .registry/               # Global registry + config
-    │   ├── config.json          # NPM credentials
+    │   ├── config.json          # Configuration (no plaintext secrets)
     │   ├── projects.json        # Project registry
+    │   ├── .master-key          # Master encryption key (0o600)
     │   └── secrets/             # Encrypted secrets
+    │       └── npm_credentials.enc  # Encrypted NPM credentials
     ├── _databases/              # Shared database containers
     │   ├── mysql/
     │   └── postgres/
@@ -550,6 +886,29 @@ docker ps -a | grep <name>
    ```
 
 2. Ensure the target version exists in releases directory
+
+### Credentials Not Working
+
+1. Check credential source:
+   ```bash
+   deploy config status
+   ```
+
+2. If using legacy credentials:
+   ```bash
+   deploy config migrate
+   ```
+
+3. If credentials missing:
+   ```bash
+   deploy config set-credentials
+   ```
+
+4. For CI/CD, verify environment variables:
+   ```bash
+   echo $NPM_EMAIL
+   echo $NPM_PASSWORD
+   ```
 
 ---
 

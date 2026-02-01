@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import crypto from 'crypto';
+import readline from 'readline';
 import { fileURLToPath } from 'url';
 import { execSync, spawn } from 'child_process';
 import chalk from 'chalk';
@@ -8,6 +9,7 @@ import ora from 'ora';
 import { NpmApi } from './services/npm-api.js';
 import { DatabaseService } from './services/database.js';
 import { SecretsManager } from './services/secrets.js';
+import { SecretsConfig } from './services/secrets-config.js';
 import { HealthChecker } from './services/health.js';
 import { detectProjectType } from './detectors/index.js';
 import {
@@ -33,6 +35,7 @@ export class Deployer {
     this.npmApi = new NpmApi();
     this.dbService = new DatabaseService(DATABASES_DIR);
     this.secrets = new SecretsManager(REGISTRY_DIR);
+    this.secretsConfig = new SecretsConfig(REGISTRY_DIR);
     this.health = new HealthChecker();
   }
 
@@ -72,11 +75,9 @@ export class Deployer {
         config = await fs.readJson(CONFIG_FILE);
         spinner.succeed('Deployer initialized (existing config loaded)');
       } else {
-        // Create default config
+        // Create default config (without plaintext credentials)
         config = {
           npmUrl: 'http://localhost:81',
-          npmEmail: '',
-          npmPassword: '',
           domain: DOMAIN_SUFFIX,
           initialized: false
         };
@@ -89,10 +90,33 @@ export class Deployer {
       console.log(`  Domain suffix: ${DOMAIN_SUFFIX}`);
       console.log(`  NPM URL: ${config.npmUrl}`);
 
-      if (!config.initialized) {
+      // Check credentials status
+      const hasCredentials = await this.secretsConfig.hasCredentials();
+      const credSource = await this.secretsConfig.getCredentialSource();
+
+      if (hasCredentials) {
+        const sourceLabel = credSource === 'env' ? 'environment variables' :
+                           credSource === 'encrypted' ? 'encrypted storage' : 'legacy config';
+        console.log(`  NPM credentials: ${chalk.green('configured')} (${sourceLabel})`);
+      } else {
+        console.log(`  NPM credentials: ${chalk.yellow('not configured')}`);
+      }
+
+      if (!config.initialized || !hasCredentials) {
         console.log('\n' + chalk.yellow('Next steps:'));
-        console.log('  1. Configure NPM credentials in: ' + CONFIG_FILE);
-        console.log('  2. Run: deploy create <name> --repo <url>');
+        if (!hasCredentials) {
+          console.log('  1. Run: deploy config set-credentials');
+          console.log('  2. Run: deploy create <name> --repo <url>');
+        } else {
+          console.log('  1. Run: deploy create <name> --repo <url>');
+        }
+      }
+
+      // Check for legacy credentials and warn
+      if (await this.secretsConfig.hasLegacyCredentials()) {
+        console.log('\n' + chalk.yellow('Security notice:'));
+        console.log('  Plaintext credentials found in config.json');
+        console.log('  Run: deploy config migrate');
       }
 
     } catch (error) {
@@ -975,5 +999,144 @@ export class Deployer {
     for (let i = MAX_RELEASES; i < sortedReleases.length; i++) {
       await fs.remove(path.join(releasesDir, sortedReleases[i]));
     }
+  }
+
+  // ============================================
+  // Secrets Management Methods
+  // ============================================
+
+  async setCredentials() {
+    console.log(chalk.cyan('\nNPM Credentials Setup\n'));
+    console.log('Credentials will be stored encrypted using AES-256-GCM.\n');
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
+
+    try {
+      const email = await question('NPM Email: ');
+      const password = await question('NPM Password: ');
+      rl.close();
+
+      if (!email || !password) {
+        console.log(chalk.red('\nEmail and password are required.'));
+        return;
+      }
+
+      const spinner = ora('Encrypting and storing credentials...').start();
+      await this.secretsConfig.setNpmCredentials(email, password);
+      spinner.succeed('Credentials stored securely');
+
+      // Test authentication
+      const testSpinner = ora('Testing NPM connection...').start();
+      const authenticated = await this.npmApi.authenticate();
+      if (authenticated) {
+        testSpinner.succeed('NPM authentication successful');
+      } else {
+        testSpinner.warn('NPM authentication test failed - credentials stored but may be invalid');
+      }
+
+      console.log(chalk.green('\nCredentials configured successfully.'));
+
+    } catch (error) {
+      rl.close();
+      throw error;
+    }
+  }
+
+  async migrateCredentials() {
+    const spinner = ora('Migrating credentials...').start();
+
+    try {
+      const migrated = await this.secretsConfig.migrateLegacyCredentials();
+
+      if (migrated) {
+        spinner.succeed('Credentials migrated to encrypted storage');
+        console.log(chalk.green('\nPlaintext credentials removed from config.json'));
+      } else {
+        spinner.info('No legacy credentials found to migrate');
+      }
+    } catch (error) {
+      spinner.fail('Migration failed');
+      throw error;
+    }
+  }
+
+  async rotateKey(options) {
+    if (!options.force) {
+      console.log(chalk.yellow('\nWARNING: This will rotate the master encryption key.'));
+      console.log('All encrypted secrets will be re-encrypted with the new key.\n');
+
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const answer = await new Promise(resolve =>
+        rl.question('Continue? (yes/no): ', resolve)
+      );
+      rl.close();
+
+      if (answer.toLowerCase() !== 'yes') {
+        console.log('Aborted.');
+        return;
+      }
+    }
+
+    const spinner = ora('Rotating encryption key...').start();
+
+    try {
+      await this.secrets.rotateKey();
+      spinner.succeed('Encryption key rotated successfully');
+    } catch (error) {
+      spinner.fail('Key rotation failed');
+      throw error;
+    }
+  }
+
+  async configStatus() {
+    console.log(chalk.cyan('\nConfiguration Status\n'));
+
+    // Check encrypted credentials
+    const secrets = await this.secrets.list();
+    const credSource = await this.secretsConfig.getCredentialSource();
+    const hasCredentials = await this.secretsConfig.hasCredentials();
+
+    const masterKeyExists = await fs.pathExists(path.join(REGISTRY_DIR, '.master-key'));
+
+    console.log('  Secrets Storage:');
+    console.log(`    Master key exists: ${masterKeyExists ? chalk.green('Yes') : chalk.red('No')}`);
+
+    const credStatusColor = hasCredentials ? chalk.green : chalk.yellow;
+    const credStatusText = credSource === 'none' ? 'Not set' :
+                          credSource === 'env' ? 'Environment variables' :
+                          credSource === 'encrypted' ? 'Encrypted' :
+                          chalk.yellow('Legacy (plaintext)');
+    console.log(`    NPM credentials: ${credStatusColor(credStatusText)}`);
+    console.log(`    Stored secrets: ${secrets.length}`);
+
+    if (secrets.length > 0) {
+      console.log('    Secret names:');
+      for (const name of secrets) {
+        console.log(`      - ${name}`);
+      }
+    }
+
+    // Check for legacy credentials
+    if (await this.secretsConfig.hasLegacyCredentials()) {
+      console.log(chalk.yellow('\n  WARNING: Legacy plaintext credentials found in config.json'));
+      console.log(chalk.yellow('  Run "deploy config migrate" to secure them.'));
+    }
+
+    // Check environment variable overrides
+    console.log('\n  Environment Overrides:');
+    console.log(`    NPM_EMAIL: ${process.env.NPM_EMAIL ? chalk.green('Set') : chalk.gray('Not set')}`);
+    console.log(`    NPM_PASSWORD: ${process.env.NPM_PASSWORD ? chalk.green('Set') : chalk.gray('Not set')}`);
+    console.log(`    DEPLOYER_MASTER_KEY: ${process.env.DEPLOYER_MASTER_KEY ? chalk.green('Set') : chalk.gray('Not set')}`);
+
+    console.log();
   }
 }

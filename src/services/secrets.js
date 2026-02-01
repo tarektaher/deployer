@@ -4,7 +4,7 @@ import path from 'path';
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
-const IV_LENGTH = 16;
+const IV_LENGTH = 12; // Standard 96-bit IV for GCM (recommended)
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 64;
 
@@ -17,6 +17,11 @@ export class SecretsManager {
 
   async ensureKey() {
     await fs.ensureDir(this.secretsDir);
+
+    // Allow master key override from environment (for CI/CD)
+    if (process.env.DEPLOYER_MASTER_KEY) {
+      return process.env.DEPLOYER_MASTER_KEY;
+    }
 
     if (await fs.pathExists(this.keyFile)) {
       return await fs.readFile(this.keyFile, 'utf8');
@@ -47,8 +52,11 @@ export class SecretsManager {
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
     const plaintext = JSON.stringify(data);
 
-    let encrypted = cipher.update(plaintext, 'utf8', 'base64');
-    encrypted += cipher.final('base64');
+    // Use Buffers directly to avoid base64 overhead
+    const encrypted = Buffer.concat([
+      cipher.update(plaintext, 'utf8'),
+      cipher.final()
+    ]);
 
     const authTag = cipher.getAuthTag();
 
@@ -57,7 +65,7 @@ export class SecretsManager {
       salt,
       iv,
       authTag,
-      Buffer.from(encrypted, 'base64')
+      encrypted
     ]).toString('base64');
   }
 
@@ -65,19 +73,23 @@ export class SecretsManager {
     const masterKey = await this.ensureKey();
     const data = Buffer.from(encryptedData, 'base64');
 
-    // Extract components
+    // Extract components with explicit boundary calculation
     const salt = data.subarray(0, SALT_LENGTH);
     const iv = data.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-    const authTag = data.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
-    const encrypted = data.subarray(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
+    const tagStart = SALT_LENGTH + IV_LENGTH;
+    const authTag = data.subarray(tagStart, tagStart + AUTH_TAG_LENGTH);
+    const encrypted = data.subarray(tagStart + AUTH_TAG_LENGTH);
 
     const key = this.deriveKey(masterKey, salt);
 
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(encrypted);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    // Buffer handling optimized
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final()
+    ]);
 
     return JSON.parse(decrypted.toString('utf8'));
   }

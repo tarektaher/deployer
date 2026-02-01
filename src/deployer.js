@@ -150,19 +150,22 @@ export class Deployer {
 
       // Clone repository
       spinner.text = 'Cloning repository...';
-      const branch = options.branch || 'main';
+      let branch = options.branch || 'main';
+      let actualBranch = branch;
       try {
         execSync(`git clone --depth 1 --branch ${branch} ${options.repo} ${releaseDir}`, {
           stdio: 'pipe',
           timeout: 120000
         });
       } catch (error) {
-        // Try master if main fails
-        if (branch === 'main') {
-          execSync(`git clone --depth 1 --branch master ${options.repo} ${releaseDir}`, {
+        // Bidirectional fallback: main ↔ master (only for default branches, not explicit -b flag)
+        if ((branch === 'main' || branch === 'master') && !options.branch) {
+          const fallbackBranch = branch === 'main' ? 'master' : 'main';
+          execSync(`git clone --depth 1 --branch ${fallbackBranch} ${options.repo} ${releaseDir}`, {
             stdio: 'pipe',
             timeout: 120000
           });
+          actualBranch = fallbackBranch;
         } else {
           throw error;
         }
@@ -266,7 +269,7 @@ export class Deployer {
         name,
         type: projectType,
         repo: options.repo,
-        branch,
+        branch: actualBranch,
         domain,
         port,
         database: options.db || 'none',
@@ -331,11 +334,26 @@ export class Deployer {
 
       // Clone fresh copy
       spinner.text = 'Cloning latest code...';
-      const branch = options.branch || metadata.branch;
-      execSync(`git clone --depth 1 --branch ${branch} ${metadata.repo} ${newReleaseDir}`, {
-        stdio: 'pipe',
-        timeout: 120000
-      });
+      let branch = options.branch || metadata.branch;
+      let actualBranch = branch;
+      try {
+        execSync(`git clone --depth 1 --branch ${branch} ${metadata.repo} ${newReleaseDir}`, {
+          stdio: 'pipe',
+          timeout: 120000
+        });
+      } catch (error) {
+        // Bidirectional fallback: main ↔ master (only for default branches, not explicit -b flag)
+        if ((branch === 'main' || branch === 'master') && !options.branch) {
+          const fallbackBranch = branch === 'main' ? 'master' : 'main';
+          execSync(`git clone --depth 1 --branch ${fallbackBranch} ${metadata.repo} ${newReleaseDir}`, {
+            stdio: 'pipe',
+            timeout: 120000
+          });
+          actualBranch = fallbackBranch;
+        } else {
+          throw error;
+        }
+      }
 
       // Copy shared files
       spinner.text = 'Linking shared files...';
@@ -401,6 +419,10 @@ export class Deployer {
       metadata.currentVersion = newVersion;
       metadata.previousVersion = path.basename(oldReleaseDir);
       metadata.updatedAt = new Date().toISOString();
+      // Update branch if fallback was used (fixes incorrect metadata from earlier deploys)
+      if (actualBranch !== metadata.branch) {
+        metadata.branch = actualBranch;
+      }
       await fs.writeJson(metadataPath, metadata, { spaces: 2 });
 
       // Cleanup old releases

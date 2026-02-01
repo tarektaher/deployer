@@ -1,13 +1,14 @@
 import axios from 'axios';
 import fs from 'fs-extra';
 import path from 'path';
+import { getRegistryDir, getNpmUrl } from '../config.js';
 
-const REGISTRY_DIR = '/home/tarek_bentaher/projects/.registry';
+const REGISTRY_DIR = getRegistryDir();
 const CONFIG_FILE = path.join(REGISTRY_DIR, 'config.json');
 
 export class NpmApi {
   constructor() {
-    this.baseUrl = 'http://localhost:81/api';
+    this.baseUrl = `${getNpmUrl()}/api`;
     this.token = null;
   }
 
@@ -42,7 +43,7 @@ export class NpmApi {
 
   async checkConnection() {
     try {
-      await axios.get('http://localhost:81', { timeout: 5000 });
+      await axios.get(getNpmUrl(), { timeout: 5000 });
       return true;
     } catch {
       return false;

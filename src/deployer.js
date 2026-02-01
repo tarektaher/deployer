@@ -10,16 +10,23 @@ import { DatabaseService } from './services/database.js';
 import { SecretsManager } from './services/secrets.js';
 import { HealthChecker } from './services/health.js';
 import { detectProjectType } from './detectors/index.js';
+import {
+  getProjectsDir,
+  getRegistryDir,
+  getDatabasesDir,
+  getDomainSuffix,
+  getMaxReleases
+} from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const PROJECTS_DIR = '/home/tarek_bentaher/projects';
-const REGISTRY_DIR = path.join(PROJECTS_DIR, '.registry');
-const DATABASES_DIR = path.join(PROJECTS_DIR, '_databases');
+const PROJECTS_DIR = getProjectsDir();
+const REGISTRY_DIR = getRegistryDir();
+const DATABASES_DIR = getDatabasesDir();
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const CONFIG_FILE = path.join(REGISTRY_DIR, 'config.json');
-const DOMAIN_SUFFIX = 'tarek-taher.duckdns.org';
-const MAX_RELEASES = 5;
+const DOMAIN_SUFFIX = getDomainSuffix();
+const MAX_RELEASES = getMaxReleases();
 
 export class Deployer {
   constructor() {

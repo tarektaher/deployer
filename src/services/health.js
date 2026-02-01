@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import axios from 'axios';
+import { getProjectsDir } from '../config.js';
 
 export class HealthChecker {
   async check(projectName, metadata) {
@@ -176,8 +177,9 @@ export class HealthChecker {
 
   async checkDiskSpace() {
     try {
+      const projectsDir = getProjectsDir();
       const output = execSync(
-        `df -h /home/tarek_bentaher/projects | tail -1 | awk '{print $5}'`,
+        `df -h ${projectsDir} | tail -1 | awk '{print $5}'`,
         { stdio: 'pipe' }
       ).toString().trim();
 

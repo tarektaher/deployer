@@ -1,0 +1,8 @@
+{
+  "projectsDir": "/path/to/your/projects",
+  "domainSuffix": "your-domain.example.com",
+  "maxReleases": 5,
+  "npm": {
+    "url": "http://localhost:81"
+  }
+}

@@ -32,7 +32,7 @@ program
   .option('-d, --db <type>', 'Database type (mysql, postgres, none)', 'none')
   .option('--domain <subdomain>', 'Custom subdomain (default: project name)')
   .option('-b, --branch <branch>', 'Git branch to deploy', 'main')
-  .option('-p, --port <port>', 'Internal container port', '3000')
+  .option('-p, --port <port>', 'Internal container port (auto-detected if not specified)')
   .action(async (name, options) => {
     try {
       await deployer.create(name, options);

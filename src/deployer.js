@@ -218,7 +218,17 @@ export class Deployer {
       const domain = `${subdomain}.${DOMAIN_SUFFIX}`;
       const port = options.port || this.getDefaultPort(projectType);
 
-      const proxyCreated = await this.npmApi.createProxyHost(domain, name, port);
+      const containerName = `${name}-app`;
+      const proxyCreated = await this.npmApi.createProxyHost(domain, containerName, port);
+
+      // Request SSL certificate
+      if (proxyCreated) {
+        spinner.text = 'Requesting SSL certificate...';
+        const certId = await this.npmApi.requestCertificate(domain);
+        if (certId) {
+          await this.npmApi.updateProxyHostCertificate(domain, certId);
+        }
+      }
 
       // Save project metadata
       const metadata = {

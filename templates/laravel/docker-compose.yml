@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./current
+      dockerfile: Dockerfile
+    container_name: "{{PROJECT_NAME}}-app"
+    restart: unless-stopped
+    env_file:
+      - ./shared/.env
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+      - ./logs:/var/log/app
+    networks:
+      - npm_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  queue:
+    build:
+      context: ./current
+      dockerfile: Dockerfile
+    container_name: "{{PROJECT_NAME}}-queue"
+    restart: unless-stopped
+    env_file:
+      - ./shared/.env
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+    networks:
+      - npm_network
+    command: ["php", "artisan", "queue:work", "--tries=3", "--timeout=90"]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: ./current
+      dockerfile: Dockerfile
+    container_name: "{{PROJECT_NAME}}-scheduler"
+    restart: unless-stopped
+    env_file:
+      - ./shared/.env
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+    networks:
+      - npm_network
+    command: ["sh", "-c", "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    depends_on:
+      app:
+        condition: service_healthy
+
+networks:
+  npm_network:
+    external: true
+    name: nginx-proxy-manager_default

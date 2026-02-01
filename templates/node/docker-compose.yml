@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./current
+      dockerfile: Dockerfile
+    container_name: "{{PROJECT_NAME}}-app"
+    restart: unless-stopped
+    env_file:
+      - ./shared/.env
+    environment:
+      - NODE_ENV=production
+      - PORT={{PORT}}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - npm_network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:{{PORT}}/health || wget -q --spider http://127.0.0.1:{{PORT}}/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  npm_network:
+    external: true
+    name: nginx-proxy-manager_default

@@ -104,7 +104,7 @@ program
   .description('Run health checks on project')
   .action(async (name) => {
     try {
-      await deployer.health(name);
+      await deployer.checkHealth(name);
     } catch (error) {
       console.error(chalk.red('Error:'), error.message);
       process.exit(1);

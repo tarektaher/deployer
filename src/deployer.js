@@ -627,7 +627,7 @@ export class Deployer {
     }
   }
 
-  async health(name) {
+  async checkHealth(name) {
     const spinner = ora(`Running health checks for ${name}...`).start();
     const projectDir = path.join(PROJECTS_DIR, name);
 

@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database initialization timeout increased from 30 seconds to 60 seconds
 
 ### Fixed
+- `deploy health <name>` command failing with "deployer.health is not a function" error
+  - Root cause: Method name `health()` was shadowing the `health` property (HealthChecker instance)
+  - Solution: Renamed method to `checkHealth()` to eliminate naming conflict
 - **Critical**: Laravel deployments failing due to missing configuration keys required by `composer install`
   - Root cause: Deployer created minimal .env (APP_KEY, DB credentials only) which was copied before Docker build, causing Dockerfile's conditional `.env.example` copy to be skipped
   - Solution: Environment files now merge all keys from `.env.example` with deployer-managed values

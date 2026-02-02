@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git branch fallback now properly handles both main↔master directions during updates
 - TOCTOU race conditions in file operations with improved error handling
 - MySQL 8.0 first-time initialization timeout (40-50 seconds required vs previous 30 second limit)
+- **MySQL password mismatch after failed provisioning**
+  - Problem: When database provisioning failed mid-operation and was retried, a new password was generated causing MySQL to have a different password than the .env file
+  - Solution: Implemented idempotent MySQL provisioning that:
+    - Checks registry first for existing passwords
+    - Validates MySQL connection before creating users
+    - Auto-fixes password mismatches by resetting MySQL to match registry
+    - Final validation ensures credentials work
 
 ### Security
 - Enhanced environment file handling with multiple security hardening measures:

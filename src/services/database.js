@@ -32,6 +32,144 @@ export class DatabaseService {
     return projectName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
   }
 
+  /**
+   * Check if a MySQL user exists
+   */
+  async checkMySqlUserExists(username, rootPassword) {
+    try {
+      const result = execSync(
+        `docker exec shared-mysql mysql -u root -p${rootPassword.trim()} -N -e "SELECT COUNT(*) FROM mysql.user WHERE user='${username}'"`,
+        { stdio: 'pipe' }
+      ).toString().trim();
+      return parseInt(result) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Validate MySQL connection with given credentials
+   */
+  async validateMySqlConnection(database, username, password) {
+    try {
+      execSync(
+        `docker exec shared-mysql mysql -u ${username} -p${password} -e "SELECT 1" ${database}`,
+        { stdio: 'pipe', timeout: 5000 }
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Reset MySQL user password
+   */
+  async resetMySqlUserPassword(username, newPassword, rootPassword) {
+    execSync(
+      `docker exec shared-mysql mysql -u root -p${rootPassword.trim()} -e "ALTER USER '${username}'@'%' IDENTIFIED BY '${newPassword}'; FLUSH PRIVILEGES;"`,
+      { stdio: 'pipe' }
+    );
+  }
+
+  /**
+   * Create a new MySQL user
+   */
+  async createMySqlUser(username, password, rootPassword) {
+    execSync(
+      `docker exec shared-mysql mysql -u root -p${rootPassword.trim()} -e "CREATE USER '${username}'@'%' IDENTIFIED BY '${password}';"`,
+      { stdio: 'pipe' }
+    );
+  }
+
+  /**
+   * Ensure MySQL database exists and user has proper grants
+   */
+  async ensureMySqlDatabase(database, username, rootPassword) {
+    execSync(
+      `docker exec shared-mysql mysql -u root -p${rootPassword.trim()} -e "CREATE DATABASE IF NOT EXISTS ${database}; GRANT ALL PRIVILEGES ON ${database}.* TO '${username}'@'%'; FLUSH PRIVILEGES;"`,
+      { stdio: 'pipe' }
+    );
+  }
+
+  /**
+   * Provision MySQL database with idempotent logic:
+   * - Reuses existing registry password when available
+   * - Validates connection and fixes password mismatches
+   * - Ensures database and grants exist
+   */
+  async provisionMySql(projectName, server) {
+    const dbName = this.generateDbName(projectName);
+    const username = `user_${dbName}`;
+    const rootPassword = await fs.readFile(
+      path.join(this.databasesDir, 'mysql', '.root-password'),
+      'utf8'
+    );
+
+    // 1. Check registry for existing credentials
+    const registry = await this.loadRegistry();
+    const existingEntry = registry.mysql?.[projectName];
+    const existingPassword = existingEntry?.password;
+
+    // 2. Check if MySQL user exists
+    const userExists = await this.checkMySqlUserExists(username, rootPassword);
+
+    let password;
+
+    if (userExists && existingPassword) {
+      // User exists AND we have registry password - validate it
+      const isValid = await this.validateMySqlConnection(dbName, username, existingPassword);
+      if (isValid) {
+        password = existingPassword; // Reuse working password
+      } else {
+        // Password mismatch - reset MySQL to match registry
+        password = existingPassword;
+        await this.resetMySqlUserPassword(username, password, rootPassword);
+      }
+    } else if (userExists && !existingPassword) {
+      // User exists but no registry - generate new and reset
+      password = this.generatePassword();
+      await this.resetMySqlUserPassword(username, password, rootPassword);
+    } else {
+      // User doesn't exist - create new
+      password = existingPassword || this.generatePassword();
+      await this.createMySqlUser(username, password, rootPassword);
+    }
+
+    // 3. Ensure database exists and grants are correct
+    await this.ensureMySqlDatabase(dbName, username, rootPassword);
+
+    // 4. Save to registry (idempotent)
+    registry.mysql = registry.mysql || {};
+    registry.mysql[projectName] = {
+      database: dbName,
+      username,
+      password,
+      host: server.host,
+      port: server.port,
+      createdAt: existingEntry?.createdAt || new Date().toISOString()
+    };
+    await this.saveRegistry(registry);
+
+    // 5. Final validation
+    const finalCheck = await this.validateMySqlConnection(dbName, username, password);
+    if (!finalCheck) {
+      throw new Error(`MySQL connection validation failed for ${username}@${dbName}`);
+    }
+
+    const url = `mysql://${username}:${password}@${server.host}:${server.port}/${dbName}`;
+
+    return {
+      type: 'mysql',
+      database: dbName,
+      username,
+      password,
+      host: server.host,
+      port: server.port,
+      url
+    };
+  }
+
   async ensureMySQLServer() {
     const containerName = 'shared-mysql';
 
@@ -168,76 +306,84 @@ networks:
     const spinner = ora(`Provisioning ${dbType} database...`).start();
 
     try {
-      const dbName = this.generateDbName(projectName);
-      const password = this.generatePassword();
-      const username = `user_${dbName}`;
-
-      let server;
-      let url;
+      let result;
 
       if (dbType === 'mysql') {
-        server = await this.ensureMySQLServer();
-        const rootPassword = await fs.readFile(
-          path.join(this.databasesDir, 'mysql', '.root-password'),
-          'utf8'
-        );
-
-        // Create database and user
-        execSync(`docker exec shared-mysql mysql -u root -p${rootPassword.trim()} -e "CREATE DATABASE IF NOT EXISTS ${dbName}; CREATE USER IF NOT EXISTS '${username}'@'%' IDENTIFIED BY '${password}'; GRANT ALL PRIVILEGES ON ${dbName}.* TO '${username}'@'%'; FLUSH PRIVILEGES;"`, {
-          stdio: 'pipe'
-        });
-
-        url = `mysql://${username}:${password}@${server.host}:${server.port}/${dbName}`;
+        const server = await this.ensureMySQLServer();
+        result = await this.provisionMySql(projectName, server);
       } else if (dbType === 'postgres') {
-        server = await this.ensurePostgresServer();
-        const rootPassword = await fs.readFile(
-          path.join(this.databasesDir, 'postgres', '.root-password'),
-          'utf8'
-        );
-
-        // Create database and user
-        execSync(`docker exec shared-postgres psql -U postgres -c "CREATE USER ${username} WITH PASSWORD '${password}';" 2>/dev/null || true`, {
-          stdio: 'pipe'
-        });
-        execSync(`docker exec shared-postgres psql -U postgres -c "CREATE DATABASE ${dbName} OWNER ${username};" 2>/dev/null || true`, {
-          stdio: 'pipe'
-        });
-        execSync(`docker exec shared-postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${dbName} TO ${username};"`, {
-          stdio: 'pipe'
-        });
-
-        url = `postgresql://${username}:${password}@${server.host}:${server.port}/${dbName}`;
+        result = await this.provisionPostgres(projectName);
       } else {
         throw new Error(`Unsupported database type: ${dbType}`);
       }
 
-      // Save to registry
-      const registry = await this.loadRegistry();
-      registry[dbType][projectName] = {
-        database: dbName,
-        username,
-        password,
-        host: server.host,
-        port: server.port,
-        createdAt: new Date().toISOString()
-      };
-      await this.saveRegistry(registry);
-
-      spinner.succeed(`Database ${dbName} provisioned`);
-
-      return {
-        type: dbType,
-        database: dbName,
-        username,
-        password,
-        host: server.host,
-        port: server.port,
-        url
-      };
+      spinner.succeed(`Database ${result.database} provisioned`);
+      return result;
     } catch (error) {
       spinner.fail('Database provisioning failed');
       throw error;
     }
+  }
+
+  /**
+   * Provision PostgreSQL database (existing logic, kept for compatibility)
+   */
+  async provisionPostgres(projectName) {
+    const dbName = this.generateDbName(projectName);
+    const username = `user_${dbName}`;
+
+    const server = await this.ensurePostgresServer();
+    const rootPassword = await fs.readFile(
+      path.join(this.databasesDir, 'postgres', '.root-password'),
+      'utf8'
+    );
+
+    // Check registry for existing credentials
+    const registry = await this.loadRegistry();
+    const existingEntry = registry.postgres?.[projectName];
+    const password = existingEntry?.password || this.generatePassword();
+
+    // Create database and user (idempotent commands)
+    execSync(`docker exec shared-postgres psql -U postgres -c "CREATE USER ${username} WITH PASSWORD '${password}';" 2>/dev/null || true`, {
+      stdio: 'pipe'
+    });
+    execSync(`docker exec shared-postgres psql -U postgres -c "CREATE DATABASE ${dbName} OWNER ${username};" 2>/dev/null || true`, {
+      stdio: 'pipe'
+    });
+    execSync(`docker exec shared-postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${dbName} TO ${username};"`, {
+      stdio: 'pipe'
+    });
+
+    // If user existed with different password, update it
+    if (existingEntry?.password) {
+      execSync(`docker exec shared-postgres psql -U postgres -c "ALTER USER ${username} WITH PASSWORD '${password}';"`, {
+        stdio: 'pipe'
+      });
+    }
+
+    const url = `postgresql://${username}:${password}@${server.host}:${server.port}/${dbName}`;
+
+    // Save to registry
+    registry.postgres = registry.postgres || {};
+    registry.postgres[projectName] = {
+      database: dbName,
+      username,
+      password,
+      host: server.host,
+      port: server.port,
+      createdAt: existingEntry?.createdAt || new Date().toISOString()
+    };
+    await this.saveRegistry(registry);
+
+    return {
+      type: 'postgres',
+      database: dbName,
+      username,
+      password,
+      host: server.host,
+      port: server.port,
+      url
+    };
   }
 
   async backup(projectName, outputFile) {

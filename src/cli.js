@@ -240,6 +240,19 @@ configCmd
     }
   });
 
+// Set domain suffix
+configCmd
+  .command('set-domain <domain>')
+  .description('Set or update the domain suffix for future deployments')
+  .action(async (domain) => {
+    try {
+      await deployer.setDomain(domain);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
 // Show config status
 configCmd
   .command('status')

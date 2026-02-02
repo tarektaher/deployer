@@ -27,6 +27,7 @@ const REGISTRY_DIR = getRegistryDir();
 const DATABASES_DIR = getDatabasesDir();
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const CONFIG_FILE = path.join(REGISTRY_DIR, 'config.json');
+const ROOT_CONFIG_FILE = path.join(__dirname, '..', 'config.json');
 const DOMAIN_SUFFIX = getDomainSuffix();
 const MAX_RELEASES = getMaxReleases();
 
@@ -1148,6 +1149,14 @@ export class Deployer {
     console.log('  Secrets Storage:');
     console.log(`    Master key exists: ${masterKeyExists ? chalk.green('Yes') : chalk.red('No')}`);
 
+    let domainSuffix;
+    try {
+      domainSuffix = getDomainSuffix();
+    } catch {
+      domainSuffix = 'Not configured';
+    }
+    console.log(`    Domain suffix: ${chalk.green(domainSuffix)}`);
+
     const credStatusColor = hasCredentials ? chalk.green : chalk.yellow;
     const credStatusText = credSource === 'none' ? 'Not set' :
                           credSource === 'env' ? 'Environment variables' :
@@ -1176,5 +1185,42 @@ export class Deployer {
     console.log(`    DEPLOYER_MASTER_KEY: ${process.env.DEPLOYER_MASTER_KEY ? chalk.green('Set') : chalk.gray('Not set')}`);
 
     console.log();
+  }
+
+  async setDomain(domain) {
+    // Validate domain format (allow subdomains and standard TLDs)
+    const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^localhost$/;
+
+    if (!domainRegex.test(domain)) {
+      throw new Error('Invalid domain format. Example: example.com, app.example.com, or localhost');
+    }
+
+    const spinner = ora('Updating domain configuration...').start();
+
+    try {
+      let config = {};
+      if (await fs.pathExists(ROOT_CONFIG_FILE)) {
+        config = await fs.readJson(ROOT_CONFIG_FILE);
+      }
+
+      const oldDomain = config.domain || config.domainSuffix;
+
+      config.domain = domain;
+
+      await fs.writeJson(ROOT_CONFIG_FILE, config, { spaces: 2 });
+
+      spinner.succeed('Domain configuration updated');
+
+      if (oldDomain && oldDomain !== domain) {
+        console.log(`\n  Old domain: ${chalk.yellow(oldDomain)}`);
+        console.log(`  New domain: ${chalk.green(domain)}`);
+      }
+
+      console.log(chalk.gray('\n  Note: This setting only affects new deployments.'));
+
+    } catch (error) {
+      spinner.fail('Failed to update domain');
+      throw error;
+    }
   }
 }

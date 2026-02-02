@@ -78,7 +78,16 @@ export function getDatabasesDir() {
 
 export function getDomainSuffix() {
   const config = loadConfigSync();
-  return config.domainSuffix;
+  const domain = config.domain || config.domainSuffix;
+
+  if (!domain) {
+    throw new Error(
+      `Domain suffix not configured.\n` +
+      `Run 'deploy config set-domain <your-domain>' to set it.`
+    );
+  }
+
+  return domain;
 }
 
 export function getMaxReleases() {

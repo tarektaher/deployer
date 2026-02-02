@@ -61,6 +61,12 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
+# Copy Composer Dependencies (Layer Caching)
+COPY composer.json composer.lock* ./
+
+# Install PHP Dependencies (No scripts, no autoloader for better caching)
+RUN composer install --no-dev --no-scripts --no-autoloader --no-interaction
+
 # Copy Application Code
 COPY . .
 
@@ -70,8 +76,10 @@ COPY --from=node_build /app/public /var/www/html/public
 # Prepare .env for composer scripts
 RUN if [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; fi
 
-# Install PHP Dependencies (Optimize for Production)
-RUN composer install --no-dev --optimize-autoloader --no-interaction
+# Finalize Composer (Dump Autoloader & Run Scripts)
+RUN composer dump-autoload --optimize --no-dev --no-interaction && \
+    composer run-script post-root-package-install --no-interaction || true && \
+    composer run-script post-create-project-cmd --no-interaction || true
 
 # Set Permissions (Base ownership, detailed fix in entrypoint)
 RUN chown -R www-data:www-data /var/www/html \

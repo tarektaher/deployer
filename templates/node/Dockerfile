@@ -13,7 +13,12 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN if [ -f package-lock.json ]; then \
+        npm ci --only=production; \
+    else \
+        echo "Warning: No package-lock.json found, using npm install"; \
+        npm install --production; \
+    fi
 
 # Copy source
 COPY . .

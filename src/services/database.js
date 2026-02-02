@@ -80,8 +80,8 @@ networks:
 
     execSync('docker compose up -d', { cwd: composeDir, stdio: 'pipe' });
 
-    // Wait for MySQL to be ready
-    await this.waitForDatabase(containerName, 'mysql', 30);
+    // Wait for MySQL to be ready (60s for first-time initialization)
+    await this.waitForDatabase(containerName, 'mysql', 60);
 
     return { host: containerName, port: 3306, rootPassword };
   }
@@ -134,8 +134,8 @@ networks:
 
     execSync('docker compose up -d', { cwd: composeDir, stdio: 'pipe' });
 
-    // Wait for PostgreSQL to be ready
-    await this.waitForDatabase(containerName, 'postgres', 30);
+    // Wait for PostgreSQL to be ready (60s for first-time initialization)
+    await this.waitForDatabase(containerName, 'postgres', 60);
 
     return { host: containerName, port: 5432, rootPassword };
   }

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-02-02
+
+### Added
+- **Configurable Memory Limits**: New `--memory` CLI option for `create` and `update` commands (default: 512M)
+- **Multi-stage Docker Builds**: Laravel deployments now include a Node.js stage to compile frontend assets (Vite/Mix) automatically
+- **Robust Entrypoint**: New `docker-entrypoint.sh` for Laravel that:
+  - Automatically fixes `storage` and `cache` permissions at runtime
+  - Creates `storage/app/public` symlink (`php artisan storage:link`) on startup
+  - Runs artisan commands as `www-data` to prevent root-owned file issues
+- **Auto-branch Detection**: `deploy create` now automatically detects the default branch (main/master/11.x) if not specified
+
+### Changed
+- Default PHP memory limit increased to 512M in Dockerfile
+- `update` command now ensures `docker-entrypoint.sh` and `.dockerignore` are properly copied to new releases
+
+### Fixed
+- `deploy update` failing due to missing `docker-entrypoint.sh` in the build context
+- `deploy create` failing for repositories where `main` is not the default branch (e.g. Laravel using `11.x`)
+- `.dockerignore` blocking necessary build files from being copied
+
 ## [1.2.0] - 2026-02-02
 
 ### Added

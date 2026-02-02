@@ -31,9 +31,10 @@ program
   .option('-t, --type <type>', 'Project type (laravel, react, vue, node)', 'auto')
   .option('-d, --db <type>', 'Database type (mysql, postgres, none)', 'none')
   .option('--domain <subdomain>', 'Custom subdomain (default: project name)')
-  .option('-b, --branch <branch>', 'Git branch to deploy', 'main')
+  .option('-b, --branch <branch>', 'Git branch to deploy')
   .option('-p, --port <port>', 'Internal container port (auto-detected if not specified)')
   .option('-P, --php-version <version>', 'PHP version (e.g., 8.2, 8.3) - auto-detected from composer.json if not specified')
+  .option('-m, --memory <limit>', 'Memory limit (e.g., 512M, 1G)', '512M')
   .action(async (name, options) => {
     try {
       await deployer.create(name, options);
@@ -48,6 +49,7 @@ program
   .command('update <name>')
   .description('Pull latest changes and perform zero-downtime deployment')
   .option('-b, --branch <branch>', 'Git branch to deploy')
+  .option('-m, --memory <limit>', 'Memory limit (e.g., 512M, 1G)', '512M')
   .action(async (name, options) => {
     try {
       await deployer.update(name, options);

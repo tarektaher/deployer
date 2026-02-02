@@ -17,7 +17,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: {{MEMORY}}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1/health"]
       interval: 30s

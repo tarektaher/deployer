@@ -152,25 +152,31 @@ export class Deployer {
 
       // Clone repository
       spinner.text = 'Cloning repository...';
-      let branch = options.branch || 'main';
+      let branch = options.branch;
       let actualBranch = branch;
+
       try {
-        execSync(`git clone --depth 1 --branch ${branch} ${options.repo} ${releaseDir}`, {
-          stdio: 'pipe',
-          timeout: 120000
-        });
-      } catch (error) {
-        // Bidirectional fallback: main ↔ master (only for default branches, not explicit -b flag)
-        if ((branch === 'main' || branch === 'master') && !options.branch) {
-          const fallbackBranch = branch === 'main' ? 'master' : 'main';
-          execSync(`git clone --depth 1 --branch ${fallbackBranch} ${options.repo} ${releaseDir}`, {
+        if (branch) {
+          // User specified a branch
+          execSync(`git clone --depth 1 --branch ${branch} ${options.repo} ${releaseDir}`, {
             stdio: 'pipe',
             timeout: 120000
           });
-          actualBranch = fallbackBranch;
         } else {
-          throw error;
+          // Use default branch
+          execSync(`git clone --depth 1 ${options.repo} ${releaseDir}`, {
+            stdio: 'pipe',
+            timeout: 120000
+          });
+          
+          // Detect the default branch name
+          actualBranch = execSync(`git -C ${releaseDir} rev-parse --abbrev-ref HEAD`, {
+            encoding: 'utf8'
+          }).trim();
+          branch = actualBranch; // Set for consistency
         }
+      } catch (error) {
+         throw new Error(`Failed to clone repository: ${error.message}`);
       }
 
       // Detect project type
@@ -392,6 +398,19 @@ export class Deployer {
       const supervisordSrc = path.join(templateDir, 'supervisord.conf');
       if (await fs.pathExists(supervisordSrc)) {
         await fs.copy(supervisordSrc, path.join(newReleaseDir, 'supervisord.conf'));
+      }
+
+      // Copy entrypoint script if exists (for Laravel)
+      const entrypointSrc = path.join(templateDir, 'docker-entrypoint.sh');
+      if (await fs.pathExists(entrypointSrc)) {
+        await fs.copy(entrypointSrc, path.join(newReleaseDir, 'docker-entrypoint.sh'));
+        await fs.chmod(path.join(newReleaseDir, 'docker-entrypoint.sh'), 0o755);
+      }
+
+      // Copy .dockerignore if exists
+      const dockerignoreSrc = path.join(templateDir, '.dockerignore');
+      if (await fs.pathExists(dockerignoreSrc)) {
+        await fs.copy(dockerignoreSrc, path.join(newReleaseDir, '.dockerignore'));
       }
 
       // Build new containers with different project name suffix
@@ -982,6 +1001,7 @@ export class Deployer {
 
   async setupDockerConfig(projectDir, releaseDir, projectType, name, options, phpVersion = '8.3') {
     const templateDir = path.join(TEMPLATES_DIR, projectType);
+    console.log(`Debug: templateDir=${templateDir}`);
 
     // Copy Dockerfile to release (with template processing for PHP version)
     const dockerfileSrc = path.join(templateDir, 'Dockerfile');
@@ -989,6 +1009,16 @@ export class Deployer {
       let dockerfileContent = await fs.readFile(dockerfileSrc, 'utf8');
       dockerfileContent = dockerfileContent.replace(/\{\{PHP_VERSION\}\}/g, phpVersion);
       await fs.writeFile(path.join(releaseDir, 'Dockerfile'), dockerfileContent);
+    }
+
+    // Copy entrypoint script if exists (for Laravel)
+    const entrypointSrc = path.join(templateDir, 'docker-entrypoint.sh');
+    const entrypointExists = await fs.pathExists(entrypointSrc);
+    console.log(`Debug: entrypointSrc=${entrypointSrc}, exists=${entrypointExists}`);
+    
+    if (entrypointExists) {
+      await fs.copy(entrypointSrc, path.join(releaseDir, 'docker-entrypoint.sh'));
+      await fs.chmod(path.join(releaseDir, 'docker-entrypoint.sh'), 0o755);
     }
 
     // Copy nginx config if exists
@@ -1003,11 +1033,19 @@ export class Deployer {
       await fs.copy(supervisordSrc, path.join(releaseDir, 'supervisord.conf'));
     }
 
+    // Copy .dockerignore if exists
+    const dockerignoreSrc = path.join(templateDir, '.dockerignore');
+    if (await fs.pathExists(dockerignoreSrc)) {
+      await fs.copy(dockerignoreSrc, path.join(releaseDir, '.dockerignore'));
+    }
+
     // Generate docker-compose.yml
     const composeTemplate = await fs.readFile(path.join(templateDir, 'docker-compose.yml'), 'utf8');
+    const memoryLimit = options.memory || '512M';
     const compose = composeTemplate
       .replace(/\{\{PROJECT_NAME\}\}/g, name)
-      .replace(/\{\{PORT\}\}/g, options.port || this.getDefaultPort(projectType));
+      .replace(/\{\{PORT\}\}/g, options.port || this.getDefaultPort(projectType))
+      .replace(/\{\{MEMORY\}\}/g, memoryLimit);
 
     await fs.writeFile(path.join(projectDir, 'docker-compose.yml'), compose);
   }
@@ -1045,16 +1083,7 @@ export class Deployer {
       // Wait for container to be ready
       await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // Fix storage permissions
-      execSync(`docker exec ${containerName} chown -R www-data:www-data /var/www/html/storage`, {
-        stdio: 'pipe'
-      });
-      execSync(`docker exec ${containerName} chmod -R 775 /var/www/html/storage`, {
-        stdio: 'pipe'
-      });
-      execSync(`docker exec ${containerName} chmod -R 775 /var/www/html/bootstrap/cache`, {
-        stdio: 'pipe'
-      });
+      // Note: Permissions are now handled by docker-entrypoint.sh
 
       // Generate app key if not set
       execSync(`docker exec ${containerName} php artisan key:generate --force`, {

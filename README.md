@@ -61,7 +61,7 @@ deploy create <project-name> --repo <git-url> [options]
 **Example:**
 
 ```bash
-deploy create my-awesome-app --repo git@github.com:user/my-awesome-app.git --db mysql --domain my-app
+deploy create my-awesome-app --repo git@github.com:user/my-awesome-app.git --db mysql --domain my-app --memory 1G
 ```
 
 **Options:**
@@ -73,7 +73,8 @@ deploy create my-awesome-app --repo git@github.com:user/my-awesome-app.git --db 
 | `-d, --db <type>`      | Database type (mysql, postgres, none).            | `none`       |
 | `--domain <subdomain>` | Custom subdomain for the project.                 | project name |
 | `-b, --branch <branch>`| The Git branch to deploy.                         | `main`       |
--p, --port <port>      | The internal port your application exposes.       | (auto)       |
+| `-p, --port <port>`    | The internal port your application exposes.       | (auto)       |
+| `-m, --memory <limit>` | Container memory limit.                           | `512M`       |
 
 ### Updating a Project
 

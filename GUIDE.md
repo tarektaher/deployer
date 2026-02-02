@@ -85,6 +85,7 @@ deploy create <name> [options]
 | `--domain <subdomain>` | Custom subdomain | project name |
 | `-b, --branch <branch>` | Git branch to deploy | `main` |
 | `-p, --port <port>` | Internal container port | varies by type |
+| `-m, --memory <limit>` | Container memory limit | `512M` |
 
 **Examples:**
 
@@ -92,8 +93,8 @@ deploy create <name> [options]
 # Auto-detect project type
 deploy create my-app --repo https://github.com/user/repo
 
-# Laravel with PostgreSQL database
-deploy create blog --repo https://github.com/user/blog --type laravel --db postgres
+# Laravel with PostgreSQL database and 1GB memory
+deploy create blog --repo https://github.com/user/blog --type laravel --db postgres --memory 1G
 
 # React app on custom subdomain
 deploy create dashboard --repo https://github.com/user/dashboard --type react --domain admin
@@ -115,6 +116,7 @@ deploy update <name> [options]
 | Option | Description |
 |--------|-------------|
 | `-b, --branch <branch>` | Git branch to deploy |
+| `-m, --memory <limit>` | New container memory limit |
 
 **What happens:**
 1. Clones fresh copy to new release directory
@@ -369,13 +371,15 @@ See [Security & Secrets Management](#security--secrets-management) for detailed 
 ### Laravel
 
 - **Runtime:** PHP 8.3-FPM + Nginx + Supervisor
+- **Build System:** Multi-stage Docker build (Node.js/Vite assets + PHP)
 - **Default Port:** 80
-- **Memory Limit:** 256MB
+- **Memory Limit:** 512M (Configurable via `--memory`)
 - **Features:**
   - Automatic `artisan key:generate`
   - Automatic `artisan migrate`
   - Automatic `artisan config:cache`
-  - Storage permissions auto-configured
+  - Automatic `artisan storage:link` (via Entrypoint)
+  - Storage permissions auto-configured (via Entrypoint)
   - Queue worker support (optional)
   - Scheduler support (optional)
 

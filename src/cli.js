@@ -33,6 +33,7 @@ program
   .option('--domain <subdomain>', 'Custom subdomain (default: project name)')
   .option('-b, --branch <branch>', 'Git branch to deploy', 'main')
   .option('-p, --port <port>', 'Internal container port (auto-detected if not specified)')
+  .option('-P, --php-version <version>', 'PHP version (e.g., 8.2, 8.3) - auto-detected from composer.json if not specified')
   .action(async (name, options) => {
     try {
       await deployer.create(name, options);

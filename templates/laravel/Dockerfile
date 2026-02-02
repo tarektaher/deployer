@@ -1,5 +1,5 @@
-# Laravel Dockerfile - PHP 8.3 FPM with Nginx
-FROM php:8.3-fpm-alpine AS base
+# Laravel Dockerfile - PHP FPM with Nginx
+FROM php:{{PHP_VERSION}}-fpm-alpine AS base
 
 # Install dependencies
 RUN apk add --no-cache \
@@ -33,6 +33,9 @@ WORKDIR /var/www/html
 
 # Copy application
 COPY . .
+
+# Prepare .env for composer scripts (will be overwritten by actual .env at runtime)
+RUN if [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; fi
 
 # Install dependencies
 RUN composer install --no-dev --optimize-autoloader --no-interaction
